@@ -1,0 +1,186 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    function isDocOwner() {
+      return isAuthenticated() && (resource == null || request.auth.uid == resource.data.userId);
+    }
+    
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+    
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+    
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    
+    function isValidUser() {
+      let data = request.resource.data;
+      let allowedFields = ['name', 'email', 'age', 'weight', 'goal', 'xp', 'level', 'createdAt', 'streak', 'achievements'];
+      
+      return hasOnlyAllowedFields(allowedFields) &&
+             (!('name' in data) || (data.name is string && data.name.size() <= 100)) &&
+             data.email is string && isValidEmail(data.email) &&
+             (!('age' in data) || (data.age is number && data.age >= 0 && data.age <= 150)) &&
+             (!('weight' in data) || (data.weight is number && data.weight >= 0 && data.weight <= 500)) &&
+             (!('goal' in data) || (data.goal is string && data.goal in ['Weight Loss', 'Muscle Gain', 'Maintain'])) &&
+             data.xp is number && data.xp >= 0 &&
+             data.level is number && data.level >= 0 &&
+             (!('createdAt' in data) || data.createdAt is string) &&
+             (!('streak' in data) || (data.streak is number && data.streak >= 0)) &&
+             (!('achievements' in data) || data.achievements is list);
+    }
+    
+    function isValidStepRecord() {
+      let data = request.resource.data;
+      let allowedFields = ['userId', 'date', 'steps', 'calories', 'updatedAt'];
+      
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.date is string && data.date.size() == 10 &&
+             data.steps is number && data.steps >= 0 &&
+             data.calories is number && data.calories >= 0 &&
+             (!('updatedAt' in data) || data.updatedAt is string);
+    }
+    
+    function isValidWorkoutRecord() {
+      let data = request.resource.data;
+      let allowedFields = ['userId', 'type', 'duration', 'calories', 'xpEarned', 'date', 'sets', 'reps', 'createdAt'];
+      
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.type is string && data.type in ['Pushups', 'Squats', 'Running', 'Strength', 'Cardio', 'Flexibility', 'running', 'cycling', 'strength', 'yoga', 'swimming', 'cardio', 'flexibility'] &&
+             data.duration is number && data.duration >= 0 &&
+             data.calories is number && data.calories >= 0 &&
+             (!('xpEarned' in data) || (data.xpEarned is number && data.xpEarned >= 0)) &&
+             data.date is string &&
+             (!('sets' in data) || data.sets is number) &&
+             (!('reps' in data) || data.reps is number);
+    }
+
+    function isValidFriend() {
+      let data = request.resource.data;
+      let allowedFields = ['userId', 'friendId', 'friendName', 'status', 'createdAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.userId is string &&
+             data.friendId is string &&
+             (data.userId == request.auth.uid || data.friendId == request.auth.uid) &&
+             data.friendName is string &&
+             data.status is string && data.status in ['pending', 'accepted', 'rejected'];
+    }
+
+    function isValidActivity() {
+      let data = request.resource.data;
+      let allowedFields = ['userId', 'type', 'distance', 'duration', 'path', 'date', 'createdAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.type is string &&
+             data.distance is number && data.distance >= 0 &&
+             data.duration is number && data.duration >= 0 &&
+             data.path is list &&
+             data.date is string;
+    }
+
+    function isValidNutrition() {
+      let data = request.resource.data;
+      let allowedFields = ['userId', 'foodName', 'calories', 'protein', 'carbs', 'fat', 'type', 'water', 'date', 'createdAt'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             (!('foodName' in data) || data.foodName is string) &&
+             (!('calories' in data) || data.calories is number && data.calories >= 0) &&
+             (!('protein' in data) || data.protein is number && data.protein >= 0) &&
+             (!('carbs' in data) || data.carbs is number && data.carbs >= 0) &&
+             (!('fat' in data) || data.fat is number && data.fat >= 0) &&
+             (!('type' in data) || data.type is string) &&
+             (!('water' in data) || data.water is number && data.water >= 0) &&
+             data.date is string;
+    }
+
+    function isValidChallenge() {
+      let data = request.resource.data;
+      let allowedFields = ['userId', 'type', 'goal', 'progress', 'completed', 'date'];
+      return hasOnlyAllowedFields(allowedFields) &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.type is string && data.type in ['daily', 'weekly'] &&
+             data.goal is number && data.goal >= 0 &&
+             data.progress is number && data.progress >= 0 &&
+             data.completed is bool &&
+             data.date is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated(); // Allow reading for leaderboard/friends
+      allow create: if isOwner(userId) && isValidUser();
+      allow update: if isOwner(userId) && isValidUser() && request.resource.data.email == resource.data.email;
+      allow delete: if false;
+    }
+    
+    match /steps/{stepId} {
+      allow get: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow list: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidStepRecord();
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidStepRecord() && request.resource.data.userId == resource.data.userId && request.resource.data.date == resource.data.date;
+      allow delete: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+    
+    match /workouts/{workoutId} {
+      allow get: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow list: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidWorkoutRecord();
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidWorkoutRecord() && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+
+    match /friends/{friendDocId} {
+      allow get: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || resource.data.friendId == request.auth.uid);
+      allow list: if isAuthenticated() && (resource.data.userId == request.auth.uid || resource.data.friendId == request.auth.uid);
+      allow create: if isAuthenticated() && isValidFriend() && request.resource.data.userId == request.auth.uid;
+      allow update: if isAuthenticated() && isValidFriend() && (resource.data.userId == request.auth.uid || resource.data.friendId == request.auth.uid) && request.resource.data.userId == resource.data.userId && request.resource.data.friendId == resource.data.friendId;
+      allow delete: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid || resource.data.friendId == request.auth.uid);
+    }
+
+    match /activities/{activityId} {
+      allow get: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow list: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidActivity();
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidActivity() && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+
+    match /nutrition/{logId} {
+      allow get: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow list: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidNutrition();
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidNutrition() && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+
+    match /challenges/{challengeId} {
+      allow get: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+      allow list: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow create: if isAuthenticated() && isValidChallenge();
+      allow update: if isAuthenticated() && resource.data.userId == request.auth.uid && isValidChallenge() && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && (resource == null || resource.data.userId == request.auth.uid);
+    }
+  }
+}
